@@ -1,0 +1,39 @@
+# Relational Schema — ClaimGuard
+
+The ClaimGuard system uses MySQL as its relational database to store structured information about policyholders, insurance policies, claims, and document verification results. Primary keys uniquely identify records, while foreign keys establish relationships between related tables.
+
+## 1. Relational Schema Notation
+
+**POLICYHOLDER**(holder_id, holder_name, ...)
+
+**POLICY**(policy_id, holder_id, policy_type, coverage_amount, start_date, end_date, status, ...)
+
+**CLAIM**(claim_id, policy_id, incident_date, claim_type, claim_amount, status, filed_date)
+
+**VERIFICATION_RESULT**(verification_id, claim_id, document_id, result, extracted_amount, reason, verified_at)
+
+**CLAIM_DOCUMENT**(attributes to be confirmed from the database schema)
+
+**PAYOUT**(attributes to be confirmed from the database schema)
+
+**USERS**(attributes to be confirmed from the database schema)
+
+## 2. Primary Keys and Foreign Keys
+
+- **POLICYHOLDER:** `holder_id` is the primary key.
+- **POLICY:** `policy_id` is the primary key; `holder_id` references the policyholder.
+- **CLAIM:** `claim_id` is the primary key; `policy_id` references the policy.
+- **VERIFICATION_RESULT:** `verification_id` is the primary key; `claim_id` references the claim.
+
+## 3. Relationships
+
+1. One policyholder can have multiple insurance policies.
+2. One insurance policy can be associated with multiple claims.
+3. One claim can have multiple verification results.
+4. Uploaded documents are stored separately in Upstash Redis and associated with claims through their document records and claim identifiers.
+
+## 4. Database Design
+
+MySQL is used for structured relational data and supports primary keys, foreign keys, joins, and data-integrity constraints. Upstash Redis is used as the NoSQL key-value store for uploaded documents, extracted text, file metadata, and file hashes used for duplicate detection.
+
+This hybrid database design allows ClaimGuard to manage structured insurance records while storing document data separately for the verification process.
