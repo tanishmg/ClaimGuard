@@ -3,8 +3,13 @@ import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { createHash, randomUUID } from "crypto";
 import { PDFParse } from "pdf-parse";
+import { getAuthUser } from "@/lib/auth";
 
 export async function POST(request: Request) {
+  const user = await getAuthUser(request);
+  if (!user || user.role !== "developer") {
+    return Response.json({ error: "Developer login required." }, { status: 401 });
+  }
   try {
     const formData = await request.formData();
 

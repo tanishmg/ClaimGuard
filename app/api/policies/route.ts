@@ -1,6 +1,7 @@
 
 import { NextResponse } from "next/server";
 import { mysqlPool } from "@/lib/mysql";
+import { getAuthUser } from "@/lib/auth";
 import type { RowDataPacket } from "mysql2";
 
 interface DbPolicy extends RowDataPacket {
@@ -14,7 +15,11 @@ interface DbPolicy extends RowDataPacket {
   status: "active" | "expired" | "cancelled";
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const user = await getAuthUser(request);
+  if (!user) {
+    return NextResponse.json({ error: "Sign in to continue." }, { status: 401 });
+  }
   try {
     const [rows] = await mysqlPool.query<DbPolicy[]>(
       `SELECT

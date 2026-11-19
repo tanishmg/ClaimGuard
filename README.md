@@ -16,6 +16,12 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## ClaimGuard login
+
+User accounts can be created from the login screen. Passwords are stored as salted scrypt hashes, and successful logins use opaque, database-backed sessions in HttpOnly cookies. The first authentication request creates the `claimguard_account` and `claimguard_session` tables in MySQL, so the configured MySQL user needs permission to create tables.
+
+Developer accounts cannot be self-registered. Configure `CLAIMGUARD_DEV_EMAIL` and `CLAIMGUARD_DEV_PASSWORD` in the server environment to provision the developer login. Use a strong password of at least 8 characters and keep these values out of client code and source control. Existing MySQL configuration uses `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, and `MYSQL_DATABASE`.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

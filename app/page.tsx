@@ -4,14 +4,18 @@ import { useEffect, useMemo, useState } from "react";
 import { Instrument_Sans, Newsreader } from "next/font/google";
 import {
   LayoutDashboard, FileText, ShieldCheck, Users, Search, Plus, X,
-  Download, Check, Ban, Flag, Bell,
+  Download, Check, Ban, Flag, Bell, UserRound, BriefcaseBusiness, LogOut,
+  Mail, LockKeyhole,
 } from "lucide-react";
+
+type WorkspaceRole = "developer" | "user";
 
 const sans = Instrument_Sans({ subsets: ["latin"] });
 const serif = Newsreader({ subsets: ["latin"], style: ["normal", "italic"] });
 
 type ClaimStatus = "Under review" | "Flagged" | "Approved" | "Rejected";
 type Risk = "Low" | "Medium" | "High";
+
 type Claim = {
   id: string;
   claimant: string;
@@ -21,6 +25,7 @@ type Claim = {
   status: ClaimStatus;
   risk: Risk;
 };
+
 type Policy = {
   id: number;
   holderId: number;
@@ -32,6 +37,14 @@ type Policy = {
   status: "active" | "expired" | "cancelled";
 };
 
+type Policyholder = {
+  holder_id: number;
+  user_id: number;
+  full_name: string;
+  phone: string;
+  address: string;
+  dob: string;
+};
 
 const navItems = [
   { label: "Overview", icon: LayoutDashboard },
@@ -40,18 +53,31 @@ const navItems = [
   { label: "Policyholders", icon: Users },
 ];
 
-// Status colours: dot + text. Risk colours: meter fill.
 const statusStyle: Record<ClaimStatus, { dot: string; bar: string }> = {
   "Under review": { dot: "bg-[#B7791F]", bar: "bg-[#D9A441]" },
   Flagged: { dot: "bg-[#C2410C]", bar: "bg-[#C2410C]" },
   Approved: { dot: "bg-[#2F7D4F]", bar: "bg-[#2F7D4F]" },
   Rejected: { dot: "bg-[#8A968F]", bar: "bg-[#B8C1BC]" },
 };
-const riskLevel: Record<Risk, number> = { Low: 1, Medium: 2, High: 3 };
-const riskFill: Record<Risk, string> = { Low: "bg-[#2F7D4F]", Medium: "bg-[#D9A441]", High: "bg-[#C2410C]" };
+
+const riskLevel: Record<Risk, number> = {
+  Low: 1,
+  Medium: 2,
+  High: 3,
+};
+
+const riskFill: Record<Risk, string> = {
+  Low: "bg-[#2F7D4F]",
+  Medium: "bg-[#D9A441]",
+  High: "bg-[#C2410C]",
+};
 
 const money = (n: number) =>
-  new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(n);
 
 function StatusLabel({ status }: { status: ClaimStatus }) {
   return (
@@ -66,8 +92,13 @@ function RiskMeter({ risk }: { risk: Risk }) {
   return (
     <span className="inline-flex items-center gap-2" title={`${risk} risk`}>
       <span className="flex gap-0.5" aria-hidden>
-        {[1, 2, 3].map(i => (
-          <span key={i} className={`h-4 w-1.5 rounded-sm ${i <= riskLevel[risk] ? riskFill[risk] : "bg-[#DDE3DF]"}`} />
+        {[1, 2, 3].map((i) => (
+          <span
+            key={i}
+            className={`h-4 w-1.5 rounded-sm ${
+              i <= riskLevel[risk] ? riskFill[risk] : "bg-[#DDE3DF]"
+            }`}
+          />
         ))}
       </span>
       <span className="text-sm text-[#44534C]">{risk}</span>
@@ -76,233 +107,491 @@ function RiskMeter({ risk }: { risk: Risk }) {
 }
 
 export default function Home() {
-  
-const [claims, setClaims] = useState<Claim[]>([]);
-const [policies, setPolicies] = useState<Policy[]>([]);
-const [loading, setLoading] = useState(true);
-const [loadError, setLoadError] = useState("");
-const [uploadedDocumentId, setUploadedDocumentId] = useState("");
+  const [role, setRole] = useState<WorkspaceRole | null>(null);
+  const [loginRole, setLoginRole] = useState<WorkspaceRole>("user");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [registering, setRegistering] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authPending, setAuthPending] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [claims, setClaims] = useState<Claim[]>([]);
+  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [policyholders, setPolicyholders] = useState<Policyholder[]>([]);
 
-useEffect(() => {
-  let cancelled = false;
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
-  async function loadClaims() {
-    try {
-      setLoading(true);
-      setLoadError("");
+  const [policyholdersLoading, setPolicyholdersLoading] = useState(false);
+  const [policyholdersError, setPolicyholdersError] = useState("");
 
-      const response = await fetch("/api/claims");
-
-      if (!response.ok) {
-        throw new Error(`Failed to load claims (${response.status})`);
-      }
-
-      const data: { claims: Claim[] } = await response.json();
-
-      if (!cancelled) {
-        setClaims(data.claims);
-      }
-    } catch (error) {
-      if (!cancelled) {
-        setLoadError(
-          error instanceof Error
-            ? error.message
-            : "Could not load claims."
-        );
-      }
-    } finally {
-      if (!cancelled) {
-        setLoading(false);
-      }
-    }
-  }
-
-  loadClaims();
-
-  return () => {
-    cancelled = true;
-  };
-}, []);
-
-useEffect(() => {
-  async function loadPolicies() {
-    try {
-      const response = await fetch("/api/policies");
-
-      if (!response.ok) {
-        throw new Error("Failed to load policies");
-      }
-
-      const data: { policies: Policy[] } = await response.json();
-      setPolicies(data.policies);
-    } catch (error) {
-      console.error("Failed to load policies:", error);
-    }
-  }
-
-  loadPolicies();
-}, []);
-
+  const [uploadedDocumentId, setUploadedDocumentId] = useState("");
+  const [uploadedDocumentClaimId, setUploadedDocumentClaimId] = useState("");
 
   const [activeNav, setActiveNav] = useState("Overview");
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [uploadedDocumentClaimId, setUploadedDocumentClaimId] = useState("");
   const [showNewClaim, setShowNewClaim] = useState(false);
   const [notice, setNotice] = useState("");
+
   const [newClaim, setNewClaim] = useState({
-  claimant: "",
-  type: "Medical",
-  amount: "",
-  policyId: "",
-  incidentDate: "",
-});
+    claimant: "",
+    type: "Medical",
+    amount: "",
+    policyId: "",
+    incidentDate: "",
+  });
 
-  const count = (s: ClaimStatus) => claims.filter(c => c.status === s).length;
-  const flagged = claims.filter(c => c.status === "Flagged");
-  const exposure = flagged.reduce((sum, c) => sum + c.amount, 0);
-  const selected = claims.find(c => c.id === selectedId) ?? null;
+  useEffect(() => {
+    let cancelled = false;
+    async function restoreSession() {
+      try {
+        const response = await fetch("/api/auth");
+        const data = await response.json();
+        if (!cancelled && response.ok && data.user) {
+          setRole(data.user.role);
+          setEmail(data.user.email);
+          setLoginRole(data.user.role);
+        }
+      } catch {
+        if (!cancelled) setAuthError("Could not connect to the login service.");
+      } finally {
+        if (!cancelled) setAuthLoading(false);
+      }
+    }
+    restoreSession();
+    return () => { cancelled = true; };
+  }, []);
 
-  const filtered = useMemo(() => claims.filter(c => {
-    const q = search.toLowerCase();
-    const matchSearch = [c.id, c.claimant, c.type, c.status].some(v => v.toLowerCase().includes(q));
-    const matchFilter = filter === "All" || c.status === filter;
-    const matchNav = activeNav !== "Fraud review" || c.status === "Flagged";
-    return matchSearch && matchFilter && matchNav;
-  }), [claims, search, filter, activeNav]);
-
-  function setStatus(id: string, status: ClaimStatus) {
-    setClaims(prev => prev.map(c => (c.id === id ? { ...c, status } : c)));
-    setNotice(`Claim ${id} marked as ${status.toLowerCase()}. Sample data only, not saved.`);
+  async function authenticate(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthPending(true);
+    setAuthError("");
+    try {
+      const response = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: registering ? "register" : "login",
+          role: loginRole,
+          email,
+          password,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setAuthError(data.error || "Could not sign in.");
+        return;
+      }
+      setRole(data.user.role);
+      setLoginRole(data.user.role);
+      setEmail(data.user.email);
+      setPassword("");
+      setRegistering(false);
+    } catch {
+      setAuthError("Could not connect to the login service.");
+    } finally {
+      setAuthPending(false);
+    }
   }
 
-async function submitClaim(e: React.FormEvent<HTMLFormElement>) {
-  e.preventDefault();
+  async function leaveWorkspace() {
+    try {
+      await fetch("/api/auth", { method: "DELETE" });
+    } finally {
+    setRole(null);
+    setActiveNav("Overview");
+    setSelectedId(null);
+    setShowNewClaim(false);
+      setPassword("");
+    }
+  }
 
-  const policyId = Number(newClaim.policyId);
-  const amount = Number(newClaim.amount);
-  const incidentDate = newClaim.incidentDate;
-  const claimType = newClaim.type.toLowerCase();
+  // Load claims
+  useEffect(() => {
+    if (role !== "developer") return;
+    let cancelled = false;
 
-  if (
-  !Number.isInteger(policyId) ||
-  policyId <= 0 ||
-  !Number.isFinite(amount) ||
-  amount <= 0 ||
-  !incidentDate
-) {
-  setNotice("Please select a policy, incident date, and valid claim amount.");
-  return;
-}
+    async function loadClaims() {
+      try {
+        setLoading(true);
+        setLoadError("");
 
-  try {
-    setNotice("");
+        const response = await fetch("/api/claims");
 
-    const response = await fetch("/api/claims", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        policyId,
-        amount,
-        incidentDate,
-        type: claimType,
+        if (!response.ok) {
+          throw new Error(`Failed to load claims (${response.status})`);
+        }
+
+        const data = await response.json();
+
+        if (!cancelled) {
+          setClaims(data.claims ?? []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(
+            error instanceof Error ? error.message : "Could not load claims."
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadClaims();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [role]);
+
+  // Load policies
+  useEffect(() => {
+    if (!role) return;
+    async function loadPolicies() {
+      try {
+        const response = await fetch("/api/policies");
+
+        if (!response.ok) {
+          throw new Error("Failed to load policies");
+        }
+
+        const data = await response.json();
+        setPolicies(data.policies ?? []);
+      } catch (error) {
+        console.error("Failed to load policies:", error);
+      }
+    }
+
+    loadPolicies();
+  }, [role]);
+
+  // Load policyholders from MySQL
+  useEffect(() => {
+    if (role !== "developer") return;
+    let cancelled = false;
+
+    async function loadPolicyholders() {
+      try {
+        setPolicyholdersLoading(true);
+        setPolicyholdersError("");
+
+        const response = await fetch("/api/policyholders");
+
+        if (!response.ok) {
+          throw new Error(`Failed to load policyholders (${response.status})`);
+        }
+
+        const data = await response.json();
+
+        if (!cancelled) {
+          setPolicyholders(data.policyholders ?? []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPolicyholdersError(
+            error instanceof Error
+              ? error.message
+              : "Could not load policyholders."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setPolicyholdersLoading(false);
+        }
+      }
+    }
+
+    loadPolicyholders();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [role]);
+
+  const count = (s: ClaimStatus) =>
+    claims.filter((c) => c.status === s).length;
+
+  const flagged = claims.filter((c) => c.status === "Flagged");
+  const exposure = flagged.reduce((sum, c) => sum + c.amount, 0);
+  const selected = claims.find((c) => c.id === selectedId) ?? null;
+
+  const filtered = useMemo(
+    () =>
+      claims.filter((c) => {
+        const q = search.toLowerCase();
+
+        const matchSearch = [c.id, c.claimant, c.type, c.status].some((v) =>
+          v.toLowerCase().includes(q)
+        );
+
+        const matchFilter = filter === "All" || c.status === filter;
+        const matchNav =
+          activeNav !== "Fraud review" || c.status === "Flagged";
+
+        return matchSearch && matchFilter && matchNav;
       }),
-    });
+    [claims, search, filter, activeNav]
+  );
 
-    const data = await response.json();
-    
-    
+  function setStatus(id: string, status: ClaimStatus) {
+    setClaims((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, status } : c))
+    );
 
-    if (!response.ok) {
-      setNotice(data.error || "Could not save the claim.");
+    setNotice(
+      `Claim ${id} marked as ${status.toLowerCase()}. Sample data only, not saved.`
+    );
+  }
+
+  async function submitClaim(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+
+    const policyId = Number(newClaim.policyId);
+    const amount = Number(newClaim.amount);
+    const incidentDate = newClaim.incidentDate;
+    const claimType = newClaim.type.toLowerCase();
+
+    if (
+      !Number.isInteger(policyId) ||
+      policyId <= 0 ||
+      !Number.isFinite(amount) ||
+      amount <= 0 ||
+      !incidentDate
+    ) {
+      setNotice("Please select a policy, incident date, and valid claim amount.");
       return;
     }
 
-    const claimsResponse = await fetch("/api/claims");
+    try {
+      setNotice("");
 
-    if (!claimsResponse.ok) {
-      throw new Error("Claim saved, but the dashboard could not refresh.");
+      const response = await fetch("/api/claims", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          policyId,
+          amount,
+          incidentDate,
+          type: claimType,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setNotice(data.error || "Could not save the claim.");
+        return;
+      }
+
+      if (role === "developer") {
+        const claimsResponse = await fetch("/api/claims");
+        if (!claimsResponse.ok) {
+          throw new Error("Claim saved, but the dashboard could not refresh.");
+        }
+        const claimsData = await claimsResponse.json();
+        setClaims(claimsData.claims ?? []);
+      }
+
+      setShowNewClaim(false);
+
+      setNewClaim({
+        claimant: "",
+        type: "Medical",
+        amount: "",
+        policyId: "",
+        incidentDate: "",
+      });
+
+      if (role === "developer") setActiveNav("All claims");
+      setFilter("All");
+      setSearch("");
+      setNotice("Claim submitted successfully. It is now in the review queue.");
+    } catch (error) {
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while saving the claim."
+      );
     }
-
-    const claimsData = await claimsResponse.json();
-    setClaims(claimsData.claims);
-
-    setShowNewClaim(false);
-    setNewClaim({
-      claimant: "",
-      type: "Medical",
-      amount: "",
-      policyId: "",
-      incidentDate: "",
-    });
-
-    setActiveNav("All claims");
-    setFilter("All");
-    setSearch("");
-    setNotice("Claim saved successfully to MySQL.");
-  } catch (error) {
-    setNotice(
-      error instanceof Error
-        ? error.message
-        : "Something went wrong while saving the claim."
-    );
   }
-}
 
-  const title =
-    activeNav === "Overview" ? "Today’s claims desk" : activeNav === "Fraud review" ? "Fraud review queue" : activeNav;
+  const title = role === "user"
+    ? "Submit a claim"
+    :
+    activeNav === "Overview"
+      ? "Today’s claims desk"
+      : activeNav === "Fraud review"
+        ? "Fraud review queue"
+        : activeNav;
 
   const figures = [
     { label: "Total claims", value: claims.length, tone: "text-[#16231F]" },
-    { label: "Awaiting review", value: count("Under review"), tone: "text-[#B7791F]" },
+    {
+      label: "Awaiting review",
+      value: count("Under review"),
+      tone: "text-[#B7791F]",
+    },
     { label: "Flagged", value: count("Flagged"), tone: "text-[#C2410C]" },
     { label: "Approved", value: count("Approved"), tone: "text-[#2F7D4F]" },
   ];
 
-  const focus = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0F5C55]";
+  const focus =
+    "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0F5C55]";
+
+  if (authLoading) {
+    return <div className={`${sans.className} flex min-h-screen items-center justify-center bg-[#F2F4F1] text-sm text-[#5A6A63]`}>Checking your login…</div>;
+  }
+
+  if (!role) {
+    return (
+      <div className={`${sans.className} min-h-screen bg-[#F2F4F1] text-[#16231F]`}>
+        <div className="mx-auto grid min-h-screen max-w-6xl items-center gap-12 px-5 py-12 lg:grid-cols-[1fr_1.1fr] lg:px-10">
+          <section>
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-[#0F2A27] text-white">
+                <ShieldCheck size={23} />
+              </span>
+              <div>
+                <p className={`${serif.className} text-2xl font-semibold leading-none`}>ClaimGuard</p>
+                <p className="mt-1 text-xs text-[#5A6A63]">Claims and fraud desk</p>
+              </div>
+            </div>
+            <p className="mt-16 text-xs font-semibold uppercase tracking-[0.2em] text-[#0F5C55]">Insurance claims, made clearer</p>
+            <h1 className={`${serif.className} mt-4 max-w-xl text-5xl font-medium leading-[1.08] tracking-tight sm:text-6xl`}>
+              A better way to manage every claim.
+            </h1>
+            <p className="mt-5 max-w-lg text-base leading-7 text-[#5A6A63]">
+              Submit a claim for review or open the developer workspace to verify documents and review claim activity.
+            </p>
+            <div className="mt-10 flex items-center gap-3 text-sm text-[#5A6A63]">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#E2ECE7] text-[#0F5C55]"><ShieldCheck size={16} /></span>
+              <span>Claims and policy details stay in one place.</span>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-[#D5DCD8] bg-white p-6 shadow-[0_24px_70px_-45px_rgba(15,42,39,0.35)] sm:p-9" aria-labelledby="choose-workspace">
+            <p className="text-sm font-semibold text-[#0F5C55]">WELCOME TO CLAIMGUARD</p>
+            <h2 id="choose-workspace" className={`${serif.className} mt-3 text-3xl font-medium`}>{registering ? "Create your account" : "Sign in to ClaimGuard"}</h2>
+            <p className="mt-2 text-sm leading-6 text-[#5A6A63]">Use your email and password to access your workspace.</p>
+            <div className="mt-6 grid grid-cols-2 rounded-lg bg-[#F2F4F1] p-1" aria-label="Login type">
+              {(["user", "developer"] as WorkspaceRole[]).map((item) => (
+                <button key={item} type="button" onClick={() => { setLoginRole(item); setRegistering(false); setAuthError(""); }} className={`${focus} rounded-md px-3 py-2.5 text-sm font-semibold capitalize ${loginRole === item ? "bg-white text-[#0F2A27] shadow-sm" : "text-[#5A6A63]"}`}>
+                  {item === "user" ? <UserRound className="mr-2 inline" size={16} /> : <BriefcaseBusiness className="mr-2 inline" size={16} />}{item}
+                </button>
+              ))}
+            </div>
+            <form className="mt-5 space-y-4" onSubmit={authenticate}>
+              <label className="block text-sm font-medium" htmlFor="login-email">Email address
+                <span className="relative mt-1.5 block"><Mail size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#7A8781]" /><input id="login-email" type="email" autoComplete="email" required maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" className={`${focus} w-full rounded-md border border-[#CBD3CE] py-3 pl-10 pr-3 text-sm font-normal`} /></span>
+              </label>
+              <label className="block text-sm font-medium" htmlFor="login-password">Password
+                <span className="relative mt-1.5 block"><LockKeyhole size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#7A8781]" /><input id="login-password" type="password" autoComplete={registering ? "new-password" : "current-password"} required minLength={8} maxLength={256} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" className={`${focus} w-full rounded-md border border-[#CBD3CE] py-3 pl-10 pr-3 text-sm font-normal`} /></span>
+              </label>
+              {authError && <p role="alert" className="rounded-md bg-[#FBEFE8] px-3 py-2.5 text-sm text-[#8B3211]">{authError}</p>}
+              <button disabled={authPending} type="submit" className={`${focus} w-full rounded-md bg-[#0F5C55] px-4 py-3 text-sm font-semibold text-white hover:bg-[#0B4A44] disabled:cursor-wait disabled:opacity-60`}>
+                {authPending ? "Please wait…" : registering ? "Create account" : "Sign in"}
+              </button>
+            </form>
+            {loginRole === "user" ? (
+              <p className="mt-5 text-center text-sm text-[#5A6A63]">{registering ? "Already have an account?" : "New to ClaimGuard?"}{" "}<button type="button" onClick={() => { setRegistering(!registering); setAuthError(""); }} className="font-semibold text-[#0F5C55] underline underline-offset-2">{registering ? "Sign in" : "Create an account"}</button></p>
+            ) : (
+              <p className="mt-5 border-t border-[#E3E8E5] pt-4 text-xs leading-5 text-[#7A8781]">Developer accounts are created by the administrator and cannot be self-registered.</p>
+            )}
+          </section>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className={`${sans.className} min-h-screen bg-[#F2F4F1] text-[#16231F] lg:flex`}>
+    <div
+      className={`${sans.className} min-h-screen bg-[#F2F4F1] text-[#16231F] lg:flex`}
+    >
       {/* Sidebar */}
       <aside className="hidden w-60 shrink-0 flex-col bg-[#0F2A27] text-[#C9D8D3] lg:flex">
         <div className="flex h-20 items-center gap-3 px-6">
-          <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[#E8F0EC] text-[#0F2A27]"><ShieldCheck size={20} /></span>
+          <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[#E8F0EC] text-[#0F2A27]">
+            <ShieldCheck size={20} />
+          </span>
           <div>
-            <p className={`${serif.className} text-xl font-semibold leading-none text-white`}>ClaimGuard</p>
+            <p className={`${serif.className} text-xl font-semibold leading-none text-white`}>
+              ClaimGuard
+            </p>
             <p className="mt-1 text-xs text-[#8FA9A1]">Claims and fraud desk</p>
           </div>
         </div>
+
         <nav className="mt-4 flex-1 px-3" aria-label="Main">
-          {navItems.map(({ label, icon: Icon }) => {
+          {navItems.filter((item) => role === "developer" || item.label === "Overview").map(({ label, icon: Icon }) => {
             const active = activeNav === label;
+
             return (
-              <button key={label} onClick={() => { setActiveNav(label); setFilter("All"); setSelectedId(null); }}
-                className={`${focus} mb-1 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${active ? "bg-[#E8F0EC] font-semibold text-[#0F2A27]" : "hover:bg-white/10 hover:text-white"}`}>
+              <button
+                key={label}
+                onClick={() => {
+                  setActiveNav(label);
+                  setFilter("All");
+                  setSelectedId(null);
+                }}
+                className={`${focus} mb-1 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                  active
+                    ? "bg-[#E8F0EC] font-semibold text-[#0F2A27]"
+                    : "hover:bg-white/10 hover:text-white"
+                }`}
+              >
                 <Icon size={18} />
                 <span className="flex-1">{label}</span>
+
                 {label === "Fraud review" && flagged.length > 0 && (
-                  <span className={`rounded px-1.5 text-xs font-semibold ${active ? "bg-[#C2410C] text-white" : "bg-[#C2410C]/90 text-white"}`}>{flagged.length}</span>
+                  <span className="rounded bg-[#C2410C]/90 px-1.5 text-xs font-semibold text-white">
+                    {flagged.length}
+                  </span>
                 )}
               </button>
             );
           })}
         </nav>
+
         <div className="border-t border-white/10 p-5">
-          <p className="text-xs leading-5 text-[#8FA9A1]">Prototype with sample data. Database connection comes next.</p>
+          <p className="text-xs leading-5 text-[#8FA9A1]">
+            Claims and policyholder data connected to MySQL.
+          </p>
+
           <div className="mt-4 flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1F4A44] text-sm font-semibold text-white">AD</span>
-            <div><p className="text-sm font-medium text-white">Admin Demo</p><p className="text-xs text-[#8FA9A1]">Administrator</p></div>
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1F4A44] text-sm font-semibold text-white">
+              AD
+            </span>
+            <div>
+              <p className="text-sm font-medium text-white">{role === "developer" ? "Developer" : "Policyholder"}</p>
+              <p className="text-xs capitalize text-[#8FA9A1]">{role} workspace</p>
+            </div>
           </div>
+          <button onClick={leaveWorkspace} className="mt-4 inline-flex items-center gap-2 text-xs text-[#B9CBC4] hover:text-white"><LogOut size={14} /> Change login type</button>
         </div>
       </aside>
 
       <div className="min-w-0 flex-1">
-        {/* Mobile nav */}
+        {/* Mobile navigation */}
         <div className="flex items-center gap-1 overflow-x-auto bg-[#0F2A27] px-3 py-2 lg:hidden">
-          {navItems.map(({ label }) => (
-            <button key={label} onClick={() => { setActiveNav(label); setFilter("All"); setSelectedId(null); }}
-              className={`${focus} whitespace-nowrap rounded-md px-3 py-2 text-sm ${activeNav === label ? "bg-[#E8F0EC] font-semibold text-[#0F2A27]" : "text-[#C9D8D3]"}`}>{label}</button>
+          {navItems.filter((item) => role === "developer" || item.label === "Overview").map(({ label }) => (
+            <button
+              key={label}
+              onClick={() => {
+                setActiveNav(label);
+                setFilter("All");
+                setSelectedId(null);
+              }}
+              className={`${focus} whitespace-nowrap rounded-md px-3 py-2 text-sm ${
+                activeNav === label
+                  ? "bg-[#E8F0EC] font-semibold text-[#0F2A27]"
+                  : "text-[#C9D8D3]"
+              }`}
+            >
+              {label}
+            </button>
           ))}
         </div>
 
@@ -310,58 +599,235 @@ async function submitClaim(e: React.FormEvent<HTMLFormElement>) {
           {/* Header */}
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-2xl">
-              <h1 className={`${serif.className} text-4xl font-medium tracking-tight sm:text-5xl`}>{title}</h1>
-              {activeNav !== "Policyholders" && (
+              <h1 className={`${serif.className} text-4xl font-medium tracking-tight sm:text-5xl`}>
+                {title}
+              </h1>
+
+              {role === "user" ? (
+                <p className="mt-3 text-base leading-7 text-[#44534C]">Submit a claim using one of your active policies. The review team will check it after submission.</p>
+              ) : activeNav !== "Policyholders" && (
                 <p className="mt-3 text-base leading-7 text-[#44534C]">
-                  {flagged.length > 0
-                    ? <><b className="font-semibold text-[#C2410C]">{flagged.length} claims</b> are flagged for fraud review, with <b className="font-semibold text-[#16231F]">{money(exposure)}</b> at stake.</>
-                    : "No claims are flagged right now."}
+                  {flagged.length > 0 ? (
+                    <>
+                      <b className="font-semibold text-[#C2410C]">
+                        {flagged.length} claims
+                      </b>{" "}
+                      are flagged for fraud review, with{" "}
+                      <b className="font-semibold text-[#16231F]">
+                        {money(exposure)}
+                      </b>{" "}
+                      at stake.
+                    </>
+                  ) : (
+                    "No claims are flagged right now."
+                  )}
                 </p>
               )}
             </div>
+
             <div className="flex items-center gap-2">
-              <button onClick={() => setNotice(`${flagged.length} claims are flagged for review.`)} aria-label="Notifications"
-                className={`${focus} relative rounded-md border border-[#CBD3CE] bg-white p-2.5 hover:bg-[#E8EDEA]`}>
-                <Bell size={18} />
-                {flagged.length > 0 && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#C2410C]" />}
+              <button onClick={leaveWorkspace} className={`${focus} inline-flex items-center gap-2 rounded-md border border-[#CBD3CE] bg-white px-3 py-2.5 text-sm font-medium hover:bg-[#E8EDEA]`}>
+                <LogOut size={16} /><span className="hidden sm:inline">Change role</span>
               </button>
-              <button onClick={() => setShowNewClaim(true)}
-                className={`${focus} inline-flex items-center gap-2 rounded-md bg-[#0F5C55] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0B4A44]`}>
-                <Plus size={17} /> Add claim
-              </button>
+              {role === "developer" && (
+                <button
+                  onClick={() => setNotice(`${flagged.length} claims are flagged for review.`)}
+                  aria-label="Notifications"
+                  className={`${focus} relative rounded-md border border-[#CBD3CE] bg-white p-2.5 hover:bg-[#E8EDEA]`}
+                >
+                  <Bell size={18} />
+                  {flagged.length > 0 && <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#C2410C]" />}
+                </button>
+              )}
+
+              {role === "user" && (
+                <button
+                  onClick={() => setShowNewClaim(true)}
+                  className={`${focus} inline-flex items-center gap-2 rounded-md bg-[#0F5C55] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0B4A44]`}
+                >
+                  <Plus size={17} /> Start a claim
+                </button>
+              )}
             </div>
           </div>
 
-          {activeNav === "Policyholders" ? (
-            <section className="mt-10 rounded-lg border border-dashed border-[#B9C4BE] p-12 text-center">
-              <Users className="mx-auto text-[#0F5C55]" size={30} />
-              <p className="mt-3 font-semibold">No policyholder data yet</p>
-              <p className="mt-1 text-sm text-[#44534C]">Connect MySQL to list policyholders here.</p>
+          {/* POLICYHOLDERS PAGE */}
+          {role === "user" ? (
+            <section className="mt-10 grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
+              <div className="rounded-xl border border-[#D5DCD8] bg-white p-6 sm:p-8">
+                <span className="inline-flex items-center gap-2 rounded-full bg-[#E8F0EC] px-3 py-1.5 text-xs font-semibold text-[#0F5C55]"><FileText size={14} /> CLAIM SUBMISSION</span>
+                <h2 className={`${serif.className} mt-5 text-3xl font-medium`}>Start with the details</h2>
+                <p className="mt-2 max-w-xl text-sm leading-6 text-[#5A6A63]">Choose the active policy, tell us when the incident happened, and enter the amount you are claiming. Your submission will be added to the developer review queue.</p>
+                <button onClick={() => setShowNewClaim(true)} className={`${focus} mt-7 inline-flex items-center gap-2 rounded-md bg-[#0F5C55] px-5 py-3 text-sm font-semibold text-white hover:bg-[#0B4A44]`}><Plus size={17} /> Add claim details</button>
+                <div className="mt-8 grid gap-3 border-t border-[#E3E8E5] pt-6 sm:grid-cols-3">
+                  {["Select a policy", "Describe the incident", "Submit for review"].map((step, index) => <div key={step} className="flex items-center gap-3 text-sm text-[#44534C]"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#F2F4F1] text-xs font-semibold text-[#0F5C55]">{index + 1}</span>{step}</div>)}
+                </div>
+              </div>
+              <aside className="rounded-xl bg-[#0F2A27] p-6 text-[#E8F0EC] sm:p-8">
+                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/10"><ShieldCheck size={20} /></span>
+                <h2 className={`${serif.className} mt-5 text-2xl font-medium text-white`}>What happens next?</h2>
+                <p className="mt-3 text-sm leading-6 text-[#B9CBC4]">After you submit, your claim is recorded and becomes available in the developer review workspace for document verification.</p>
+                <div className="mt-6 flex items-center gap-3 border-t border-white/10 pt-5 text-sm text-[#B9CBC4]"><span className="h-2 w-2 rounded-full bg-[#D9A441]" /> Submitted claims enter review</div>
+              </aside>
+            </section>
+          ) : activeNav === "Policyholders" ? (
+            <section className="mt-10">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className={`${serif.className} text-2xl font-medium`}>
+                  Registered policyholders
+                </h2>
+
+                <span className="text-sm text-[#5A6A63]">
+                  {policyholders.length} records
+                </span>
+              </div>
+
+              <div className="overflow-x-auto rounded-lg border border-[#D5DCD8] bg-white">
+                {policyholdersLoading ? (
+                  <div className="p-12 text-center text-sm text-[#5A6A63]">
+                    Loading policyholders from MySQL...
+                  </div>
+                ) : policyholdersError ? (
+                  <div className="p-12 text-center">
+                    <p className="font-medium text-red-700">
+                      Could not load policyholders
+                    </p>
+                    <p className="mt-2 text-sm text-[#5A6A63]">
+                      {policyholdersError}
+                    </p>
+                    <button
+                      onClick={() => window.location.reload()}
+                      className="mt-4 rounded-md border border-[#CBD3CE] px-3 py-2 text-sm"
+                    >
+                      Try again
+                    </button>
+                  </div>
+                ) : policyholders.length === 0 ? (
+                  <div className="p-12 text-center">
+                    <Users className="mx-auto text-[#0F5C55]" size={30} />
+                    <p className="mt-3 font-semibold">
+                      No policyholders found
+                    </p>
+                  </div>
+                ) : (
+                  <table className="w-full min-w-[700px] text-left">
+                    <thead>
+                      <tr className="border-b border-[#D5DCD8] bg-[#F7F9F7] text-sm text-[#5A6A63]">
+                        {[
+                          "Holder ID",
+                          "Name",
+                          "Phone",
+                          "Address",
+                          "Date of Birth",
+                        ].map((heading) => (
+                          <th
+                            key={heading}
+                            className="px-5 py-4 font-medium"
+                          >
+                            {heading}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+
+                    <tbody className="divide-y divide-[#E3E8E5]">
+                      {policyholders.map((person) => (
+                        <tr
+                          key={person.holder_id}
+                          className="transition-colors hover:bg-[#F2F6F4]"
+                        >
+                          <td className="px-5 py-4 text-sm">
+                            #{person.holder_id}
+                          </td>
+                          <td className="px-5 py-4 text-sm font-semibold">
+                            {person.full_name}
+                          </td>
+                          <td className="px-5 py-4 text-sm">
+                            {person.phone}
+                          </td>
+                          <td className="px-5 py-4 text-sm">
+                            {person.address}
+                          </td>
+                          <td className="px-5 py-4 text-sm">
+                            {person.dob
+                              ? new Date(person.dob).toLocaleDateString("en-IN")
+                              : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <p className="mt-3 text-sm text-[#5A6A63]">
+                Showing {policyholders.length} policyholders from the database.
+              </p>
             </section>
           ) : (
             <>
-              {/* Summary band: figures + one status bar */}
+              {/* Summary */}
               {activeNav !== "Fraud review" && (
-                <section className="mt-8 rounded-lg border border-[#D5DCD8] bg-white" aria-label="Summary">
+                <section
+                  className="mt-8 rounded-lg border border-[#D5DCD8] bg-white"
+                  aria-label="Summary"
+                >
                   <dl className="grid grid-cols-2 divide-x divide-y divide-[#E3E8E5] sm:grid-cols-4 sm:divide-y-0">
-                    {figures.map(f => (
+                    {figures.map((f) => (
                       <div key={f.label} className="px-5 py-5">
                         <dt className="text-sm text-[#5A6A63]">{f.label}</dt>
-                        <dd className={`${serif.className} mt-1 text-5xl font-medium tabular-nums ${f.tone}`}>{f.value}</dd>
+                        <dd className={`${serif.className} mt-1 text-5xl font-medium tabular-nums ${f.tone}`}>
+                          {f.value}
+                        </dd>
                       </div>
                     ))}
                   </dl>
+
                   <div className="border-t border-[#E3E8E5] px-5 py-4">
-                    <div className="flex h-3 overflow-hidden rounded-full bg-[#E3E8E5]" role="img"
-                      aria-label={`Status split: ${count("Approved")} approved, ${count("Under review")} under review, ${count("Flagged")} flagged, ${count("Rejected")} rejected`}>
-                      {(["Approved", "Under review", "Flagged", "Rejected"] as ClaimStatus[]).map(s => (
-                        <div key={s} className={statusStyle[s].bar} style={{ width: `${claims.length ? (count(s) / claims.length) * 100 : 0}%` }} />
+                    <div
+                      className="flex h-3 overflow-hidden rounded-full bg-[#E3E8E5]"
+                      role="img"
+                      aria-label="Claim status split"
+                    >
+                      {(
+                        [
+                          "Approved",
+                          "Under review",
+                          "Flagged",
+                          "Rejected",
+                        ] as ClaimStatus[]
+                      ).map((s) => (
+                        <div
+                          key={s}
+                          className={statusStyle[s].bar}
+                          style={{
+                            width: `${
+                              claims.length
+                                ? (count(s) / claims.length) * 100
+                                : 0
+                            }%`,
+                          }}
+                        />
                       ))}
                     </div>
+
                     <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1">
-                      {(["Approved", "Under review", "Flagged", "Rejected"] as ClaimStatus[]).map(s => (
-                        <span key={s} className="inline-flex items-center gap-2 text-xs text-[#5A6A63]">
-                          <span className={`h-2 w-2 rounded-full ${statusStyle[s].dot}`} />{s} {count(s)}
+                      {(
+                        [
+                          "Approved",
+                          "Under review",
+                          "Flagged",
+                          "Rejected",
+                        ] as ClaimStatus[]
+                      ).map((s) => (
+                        <span
+                          key={s}
+                          className="inline-flex items-center gap-2 text-xs text-[#5A6A63]"
+                        >
+                          <span
+                            className={`h-2 w-2 rounded-full ${statusStyle[s].dot}`}
+                          />
+                          {s} {count(s)}
                         </span>
                       ))}
                     </div>
@@ -372,18 +838,38 @@ async function submitClaim(e: React.FormEvent<HTMLFormElement>) {
               {/* Claims table */}
               <section className="mt-8" aria-label="Claims">
                 <div className="flex flex-wrap items-end justify-between gap-3">
-                  <h2 className={`${serif.className} text-2xl font-medium`}>{activeNav === "Fraud review" ? "Flagged claims" : "Recent claims"}</h2>
+                  <h2 className={`${serif.className} text-2xl font-medium`}>
+                    {activeNav === "Fraud review"
+                      ? "Flagged claims"
+                      : "Recent claims"}
+                  </h2>
+
                   <div className="flex flex-wrap items-center gap-2">
                     <label className="relative">
                       <span className="sr-only">Search claims</span>
-                      <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7A74]" />
-                      <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or ID"
-                        className={`${focus} w-56 rounded-md border border-[#CBD3CE] bg-white py-2 pl-9 pr-3 text-sm placeholder:text-[#8A968F]`} />
+                      <Search
+                        size={16}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7A74]"
+                      />
+                      <input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search by name or ID"
+                        className={`${focus} w-56 rounded-md border border-[#CBD3CE] bg-white py-2 pl-9 pr-3 text-sm placeholder:text-[#8A968F]`}
+                      />
                     </label>
-                    <select value={filter} onChange={e => setFilter(e.target.value)} aria-label="Filter by status"
-                      className={`${focus} rounded-md border border-[#CBD3CE] bg-white px-3 py-2 text-sm`}>
+
+                    <select
+                      value={filter}
+                      onChange={(e) => setFilter(e.target.value)}
+                      aria-label="Filter by status"
+                      className={`${focus} rounded-md border border-[#CBD3CE] bg-white px-3 py-2 text-sm`}
+                    >
                       <option value="All">All statuses</option>
-                      <option>Under review</option><option>Flagged</option><option>Approved</option><option>Rejected</option>
+                      <option>Under review</option>
+                      <option>Flagged</option>
+                      <option>Approved</option>
+                      <option>Rejected</option>
                     </select>
                   </div>
                 </div>
@@ -392,65 +878,117 @@ async function submitClaim(e: React.FormEvent<HTMLFormElement>) {
                   <table className="w-full min-w-[760px] text-left">
                     <thead>
                       <tr className="border-b border-[#D5DCD8] bg-[#F7F9F7] text-sm text-[#5A6A63]">
-                        {["Claim", "Claimant", "Type", "Amount", "Risk", "Status"].map(h => (
-                          <th key={h} scope="col" className={`px-5 py-3 font-medium ${h === "Amount" ? "text-right" : ""}`}>{h}</th>
+                        {[
+                          "Claim",
+                          "Claimant",
+                          "Type",
+                          "Amount",
+                          "Risk",
+                          "Status",
+                        ].map((h) => (
+                          <th
+                            key={h}
+                            scope="col"
+                            className={`px-5 py-3 font-medium ${
+                              h === "Amount" ? "text-right" : ""
+                            }`}
+                          >
+                            {h}
+                          </th>
                         ))}
                       </tr>
                     </thead>
+
                     <tbody className="divide-y divide-[#E3E8E5]">
-                      {filtered.map(c => (
-                        <tr key={c.id} onClick={() => setSelectedId(c.id)}
-                          className={`cursor-pointer transition-colors hover:bg-[#F2F6F4] ${selectedId === c.id ? "bg-[#E8F0EC]" : ""}`}>
+                      {filtered.map((c) => (
+                        <tr
+                          key={c.id}
+                          onClick={() => setSelectedId(c.id)}
+                          className={`cursor-pointer transition-colors hover:bg-[#F2F6F4] ${
+                            selectedId === c.id ? "bg-[#E8F0EC]" : ""
+                          }`}
+                        >
                           <td className="whitespace-nowrap px-5 py-4">
-                            <button onClick={e => { e.stopPropagation(); setSelectedId(c.id); }} className={`${focus} rounded text-sm font-semibold text-[#0F5C55] underline-offset-2 hover:underline`}>{c.id}</button>
-                            <p className="mt-0.5 text-xs text-[#6B7A74]">{c.date}</p>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedId(c.id);
+                              }}
+                              className={`${focus} rounded text-sm font-semibold text-[#0F5C55] underline-offset-2 hover:underline`}
+                            >
+                              {c.id}
+                            </button>
+                            <p className="mt-0.5 text-xs text-[#6B7A74]">
+                              {c.date}
+                            </p>
                           </td>
-                          <td className="whitespace-nowrap px-5 py-4 text-sm font-medium">{c.claimant}</td>
-                          <td className="whitespace-nowrap px-5 py-4 text-sm text-[#44534C]">{c.type}</td>
-                          <td className="whitespace-nowrap px-5 py-4 text-right text-sm font-semibold tabular-nums">{money(c.amount)}</td>
-                          <td className="px-5 py-4"><RiskMeter risk={c.risk} /></td>
-                          <td className="px-5 py-4"><StatusLabel status={c.status} /></td>
+
+                          <td className="whitespace-nowrap px-5 py-4 text-sm font-medium">
+                            {c.claimant}
+                          </td>
+                          <td className="whitespace-nowrap px-5 py-4 text-sm text-[#44534C]">
+                            {c.type}
+                          </td>
+                          <td className="whitespace-nowrap px-5 py-4 text-right text-sm font-semibold tabular-nums">
+                            {money(c.amount)}
+                          </td>
+                          <td className="px-5 py-4">
+                            <RiskMeter risk={c.risk} />
+                          </td>
+                          <td className="px-5 py-4">
+                            <StatusLabel status={c.status} />
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                  
-{loading ? (
-  <div className="p-12 text-center text-sm text-[#5A6A63]">
-    Loading claims from MySQL...
-  </div>
-) : loadError ? (
-  <div className="p-12 text-center">
-    <p className="font-medium text-red-700">
-      Could not load claims
-    </p>
-    <p className="mt-1 text-sm text-[#5A6A63]">
-      {loadError}
-    </p>
-    <button
-      onClick={() => window.location.reload()}
-      className="mt-3 rounded-md border border-[#CBD3CE] px-3 py-2 text-sm"
-    >
-      Try again
-    </button>
-  </div>
-) : filtered.length === 0 ? (
-  <div className="p-12 text-center">
-    <p className="font-medium">
-      {claims.length === 0 ? "No claims yet" : "No claims match"}
-    </p>
-    <p className="mt-1 text-sm text-[#5A6A63]">
-      {claims.length === 0
-        ? "Add a claim to get started."
-        : "Clear the search or choose All statuses."}
-    </p>
-  </div>
-) : null}
+
+                  {loading ? (
+                    <div className="p-12 text-center text-sm text-[#5A6A63]">
+                      Loading claims from MySQL...
+                    </div>
+                  ) : loadError ? (
+                    <div className="p-12 text-center">
+                      <p className="font-medium text-red-700">
+                        Could not load claims
+                      </p>
+                      <p className="mt-1 text-sm text-[#5A6A63]">
+                        {loadError}
+                      </p>
+                      <button
+                        onClick={() => window.location.reload()}
+                        className="mt-3 rounded-md border border-[#CBD3CE] px-3 py-2 text-sm"
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  ) : filtered.length === 0 ? (
+                    <div className="p-12 text-center">
+                      <p className="font-medium">
+                        {claims.length === 0
+                          ? "No claims yet"
+                          : "No claims match"}
+                      </p>
+                      <p className="mt-1 text-sm text-[#5A6A63]">
+                        {claims.length === 0
+                          ? "Add a claim to get started."
+                          : "Clear the search or choose All statuses."}
+                      </p>
+                    </div>
+                  ) : null}
 
                   <div className="flex items-center justify-between border-t border-[#E3E8E5] px-5 py-3">
-                    <p className="text-sm text-[#5A6A63]">Showing {filtered.length} of {claims.length} claims</p>
-                    <button onClick={() => setNotice("Export will use real database records in a later build.")}
-                      className={`${focus} inline-flex items-center gap-2 rounded-md border border-[#CBD3CE] px-3 py-1.5 text-sm font-medium hover:bg-[#E8EDEA]`}>
+                    <p className="text-sm text-[#5A6A63]">
+                      Showing {filtered.length} of {claims.length} claims
+                    </p>
+                    <button
+                      onClick={() =>
+                        setNotice(
+                          "Export will use real database records in a later build."
+                        )
+                      }
+                      className={`${focus} inline-flex items-center gap-2 rounded-md border border-[#CBD3CE] px-3 py-1.5 text-sm font-medium hover:bg-[#E8EDEA]`}
+                    >
                       <Download size={15} /> Export report
                     </button>
                   </div>
@@ -461,137 +999,183 @@ async function submitClaim(e: React.FormEvent<HTMLFormElement>) {
         </main>
       </div>
 
-      {/* Detail drawer with working decisions */}
+      {/* Claim detail drawer */}
       {selected && (
-        <div className="fixed inset-0 z-40 flex justify-end bg-[#0F2A27]/40" onClick={() => setSelectedId(null)}>
-          <aside role="dialog" aria-label="Claim details" onClick={e => e.stopPropagation()}
-            className="flex h-full w-full max-w-md flex-col overflow-y-auto bg-white p-6 shadow-2xl">
+        <div
+          className="fixed inset-0 z-40 flex justify-end bg-[#0F2A27]/40"
+          onClick={() => setSelectedId(null)}
+        >
+          <aside
+            role="dialog"
+            aria-label="Claim details"
+            onClick={(e) => e.stopPropagation()}
+            className="flex h-full w-full max-w-md flex-col overflow-y-auto bg-white p-6 shadow-2xl"
+          >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-sm font-semibold text-[#0F5C55]">{selected.id}</p>
-                <h2 className={`${serif.className} mt-1 text-3xl font-medium`}>{selected.claimant}</h2>
+                <p className="text-sm font-semibold text-[#0F5C55]">
+                  {selected.id}
+                </p>
+                <h2 className={`${serif.className} mt-1 text-3xl font-medium`}>
+                  {selected.claimant}
+                </h2>
               </div>
-              <button onClick={() => setSelectedId(null)} aria-label="Close details" className={`${focus} rounded-md p-2 hover:bg-[#E8EDEA]`}><X size={20} /></button>
+              <button
+                onClick={() => setSelectedId(null)}
+                aria-label="Close details"
+                className={`${focus} rounded-md p-2 hover:bg-[#E8EDEA]`}
+              >
+                <X size={20} />
+              </button>
             </div>
 
-            <p className={`${serif.className} mt-6 text-4xl font-medium tabular-nums`}>{money(selected.amount)}</p>
-            <p className="mt-1 text-sm text-[#5A6A63]">{selected.type} claim filed {selected.date}</p>
+            <p className={`${serif.className} mt-6 text-4xl font-medium tabular-nums`}>
+              {money(selected.amount)}
+            </p>
+            <p className="mt-1 text-sm text-[#5A6A63]">
+              {selected.type} claim filed {selected.date}
+            </p>
+
             <div className="mt-6">
-  
-<label className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-[#183D32] px-4 py-3 text-sm font-medium text-white transition hover:bg-[#285747]">
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="18"
-    height="18"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <polyline points="17 8 12 3 7 8" />
-    <line x1="12" x2="12" y1="3" y2="15" />
-  </svg>
+              <label className="mt-5 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-[#183D32] px-4 py-3 text-sm font-medium text-white transition hover:bg-[#285747]">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" x2="12" y1="3" y2="15" />
+                </svg>
 
-  Upload supporting document
+                Upload supporting document
 
-  <input
-    type="file"
-    accept=".pdf,.jpg,.jpeg,.png"
-    className="hidden"
-    onChange={async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
 
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("claimId", selected.id);
+                    const formData = new FormData();
+                    formData.append("file", file);
+                    formData.append("claimId", selected.id);
 
-      try {
-        const response = await fetch("/api/documents", {
-          method: "POST",
-          body: formData,
-        });
+                    try {
+                      const response = await fetch("/api/documents", {
+                        method: "POST",
+                        body: formData,
+                      });
 
-        const data = await response.json();
-        if (response.ok && data.documentId) {
-  setUploadedDocumentId(data.documentId);
-  setUploadedDocumentClaimId(selected.id);
-}
+                      const data = await response.json();
 
-        setNotice(
-          response.ok
-            ? "Document uploaded successfully."
-            : data.error || "Upload failed."
-        );
-      } catch {
-        setNotice("Could not upload the document.");
-      } finally {
-        e.target.value = "";
-      }
-    }}
-  />
-</label>
+                      if (response.ok && data.documentId) {
+                        setUploadedDocumentId(data.documentId);
+                        setUploadedDocumentClaimId(selected.id);
+                      }
 
+                      setNotice(
+                        response.ok
+                          ? "Document uploaded successfully."
+                          : data.error || "Upload failed."
+                      );
+                    } catch {
+                      setNotice("Could not upload the document.");
+                    } finally {
+                      e.target.value = "";
+                    }
+                  }}
+                />
+              </label>
 
-<button
-  type="button"
-  disabled={
-  !uploadedDocumentId ||
-  uploadedDocumentClaimId !== selected.id
-}
-  onClick={async () => {
-    try {
-      const response = await fetch("/api/verify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          claimId: selected.id,
-          documentId: uploadedDocumentId,
-        }),
-      });
+              <button
+                type="button"
+                disabled={
+                  !uploadedDocumentId ||
+                  uploadedDocumentClaimId !== selected.id
+                }
+                onClick={async () => {
+                  try {
+                    const response = await fetch("/api/verify", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        claimId: selected.id,
+                        documentId: uploadedDocumentId,
+                      }),
+                    });
 
-      const data = await response.json();
+                    const data = await response.json();
 
-      setNotice(
-        response.ok
-          ? `${data.result}: ${data.reason}`
-          : data.error || "Verification failed."
-      );
-    } catch {
-      setNotice("Could not verify the document.");
-    }
-  }}
-  className="mt-6 block rounded-xl border border-[#183D32] px-4 py-3 text-sm font-medium text-[#183D32] transition hover:bg-[#EAF0EC] disabled:cursor-not-allowed disabled:opacity-40"
->
-  Verify document
-</button>
+                    setNotice(
+                      response.ok
+                        ? `${data.result}: ${data.reason}`
+                        : data.error || "Verification failed."
+                    );
+                  } catch {
+                    setNotice("Could not verify the document.");
+                  }
+                }}
+                className="mt-6 block rounded-xl border border-[#183D32] px-4 py-3 text-sm font-medium text-[#183D32] transition hover:bg-[#EAF0EC] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Verify document
+              </button>
 
-
-  <p className="mt-2 text-xs text-[#5A6A63]">
-    PDF, JPG, or PNG. Maximum size: 5 MB.
-  </p>
-</div>
+              <p className="mt-2 text-xs text-[#5A6A63]">
+                PDF, JPG, or PNG. Maximum size: 5 MB.
+              </p>
+            </div>
 
             <dl className="mt-6 divide-y divide-[#E3E8E5] border-y border-[#E3E8E5] text-sm">
-              <div className="flex items-center justify-between py-3"><dt className="text-[#5A6A63]">Status</dt><dd><StatusLabel status={selected.status} /></dd></div>
-              <div className="flex items-center justify-between py-3"><dt className="text-[#5A6A63]">Risk</dt><dd><RiskMeter risk={selected.risk} /></dd></div>
+              <div className="flex items-center justify-between py-3">
+                <dt className="text-[#5A6A63]">Status</dt>
+                <dd>
+                  <StatusLabel status={selected.status} />
+                </dd>
+              </div>
+              <div className="flex items-center justify-between py-3">
+                <dt className="text-[#5A6A63]">Risk</dt>
+                <dd>
+                  <RiskMeter risk={selected.risk} />
+                </dd>
+              </div>
             </dl>
 
             {selected.status === "Flagged" && (
               <p className="mt-5 rounded-md border-l-4 border-[#C2410C] bg-[#FBEFE8] p-3 text-sm leading-6 text-[#7A2E0A]">
-                Flagged for review. This is a sample flag and not a fraud finding.
+                Flagged for review. This is a sample flag and not a fraud
+                finding.
               </p>
             )}
 
             <div className="mt-auto pt-8">
               <p className="mb-3 text-sm font-medium">Decision</p>
               <div className="grid grid-cols-3 gap-2">
-                <button onClick={() => setStatus(selected.id, "Approved")} className={`${focus} flex items-center justify-center gap-1.5 rounded-md bg-[#2F7D4F] px-3 py-2.5 text-sm font-semibold text-white hover:bg-[#256340]`}><Check size={16} />Approve</button>
-                <button onClick={() => setStatus(selected.id, "Flagged")} className={`${focus} flex items-center justify-center gap-1.5 rounded-md border border-[#C2410C] px-3 py-2.5 text-sm font-semibold text-[#C2410C] hover:bg-[#FBEFE8]`}><Flag size={16} />Flag</button>
-                <button onClick={() => setStatus(selected.id, "Rejected")} className={`${focus} flex items-center justify-center gap-1.5 rounded-md border border-[#CBD3CE] px-3 py-2.5 text-sm font-semibold hover:bg-[#E8EDEA]`}><Ban size={16} />Reject</button>
+                <button
+                  onClick={() => setStatus(selected.id, "Approved")}
+                  className={`${focus} flex items-center justify-center gap-1.5 rounded-md bg-[#2F7D4F] px-3 py-2.5 text-sm font-semibold text-white hover:bg-[#256340]`}
+                >
+                  <Check size={16} /> Approve
+                </button>
+                <button
+                  onClick={() => setStatus(selected.id, "Flagged")}
+                  className={`${focus} flex items-center justify-center gap-1.5 rounded-md border border-[#C2410C] px-3 py-2.5 text-sm font-semibold text-[#C2410C] hover:bg-[#FBEFE8]`}
+                >
+                  <Flag size={16} /> Flag
+                </button>
+                <button
+                  onClick={() => setStatus(selected.id, "Rejected")}
+                  className={`${focus} flex items-center justify-center gap-1.5 rounded-md border border-[#CBD3CE] px-3 py-2.5 text-sm font-semibold hover:bg-[#E8EDEA]`}
+                >
+                  <Ban size={16} /> Reject
+                </button>
               </div>
             </div>
           </aside>
@@ -601,45 +1185,69 @@ async function submitClaim(e: React.FormEvent<HTMLFormElement>) {
       {/* New claim dialog */}
       {showNewClaim && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F2A27]/50 p-4">
-          <form onSubmit={submitClaim} role="dialog" aria-label="Add claim" className="w-full max-w-md rounded-lg bg-white p-6 shadow-2xl">
+          <form
+            onSubmit={submitClaim}
+            role="dialog"
+            aria-label="Add claim"
+            className="w-full max-w-md rounded-lg bg-white p-6 shadow-2xl"
+          >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className={`${serif.className} text-2xl font-medium`}>Add a claim</h2>
+                <h2 className={`${serif.className} text-2xl font-medium`}>
+                  Add a claim
+                </h2>
                 <p className="mt-1 text-sm text-[#5A6A63]">
-  Submit a claim against an active policy for verification.
-</p>
+                  Submit a claim against an active policy for verification.
+                </p>
               </div>
-              <button type="button" onClick={() => setShowNewClaim(false)} aria-label="Close form" className={`${focus} rounded-md p-2 hover:bg-[#E8EDEA]`}><X size={20} /></button>
+
+              <button
+                type="button"
+                onClick={() => setShowNewClaim(false)}
+                aria-label="Close form"
+                className={`${focus} rounded-md p-2 hover:bg-[#E8EDEA]`}
+              >
+                <X size={20} />
+              </button>
             </div>
+
             <div className="mt-5 space-y-4">
-              
-              <label className="block text-sm font-medium">Claim type
-                <select value={newClaim.type} onChange={e => setNewClaim({ ...newClaim, type: e.target.value })}
-                  className={`${focus} mt-1.5 w-full rounded-md border border-[#CBD3CE] bg-white px-3 py-2.5 text-sm font-normal`}>
-                  <option>Medical</option><option>Auto</option><option>Property</option>
+              <label className="block text-sm font-medium">
+                Claim type
+                <select
+                  value={newClaim.type}
+                  onChange={(e) =>
+                    setNewClaim({ ...newClaim, type: e.target.value })
+                  }
+                  className={`${focus} mt-1.5 w-full rounded-md border border-[#CBD3CE] bg-white px-3 py-2.5 text-sm font-normal`}
+                >
+                  <option>Medical</option>
+                  <option>Auto</option>
+                  <option>Property</option>
                 </select>
               </label>
-                            <label className="block text-sm font-medium">
+
+              <label className="block text-sm font-medium">
                 Select policy
                 <select
                   required
-                  value={newClaim.policyId ?? ""}
-                  onChange={(e) =>
+                  value={newClaim.policyId}
+                  onChange={(e) => {
+                    const selectedPolicy = policies.find(
+                      (p) => p.id === Number(e.target.value)
+                    );
+
                     setNewClaim({
                       ...newClaim,
                       policyId: e.target.value,
                       type:
-                        policies.find(
-                          (p) => p.id === Number(e.target.value)
-                        )?.type === "medical"
+                        selectedPolicy?.type === "medical"
                           ? "Medical"
-                          : policies.find(
-                              (p) => p.id === Number(e.target.value)
-                            )?.type === "auto"
+                          : selectedPolicy?.type === "auto"
                             ? "Auto"
                             : "Property",
-                    })
-                  }
+                    });
+                  }}
                   className={`${focus} mt-1.5 w-full rounded-md border border-[#CBD3CE] bg-white px-3 py-2.5 text-sm font-normal`}
                 >
                   <option value="">Choose a policy</option>
@@ -647,14 +1255,15 @@ async function submitClaim(e: React.FormEvent<HTMLFormElement>) {
                     .filter((policy) => policy.status === "active")
                     .map((policy) => (
                       <option key={policy.id} value={policy.id}>
-                        {policy.holderName} — {policy.type} — Policy #{policy.id} — ₹
+                        {policy.holderName} — {policy.type} — Policy #
+                        {policy.id} — ₹
                         {policy.coverageAmount.toLocaleString("en-IN")}
                       </option>
                     ))}
                 </select>
               </label>
 
-                            <label className="block text-sm font-medium">
+              <label className="block text-sm font-medium">
                 Incident date
                 <input
                   required
@@ -669,14 +1278,37 @@ async function submitClaim(e: React.FormEvent<HTMLFormElement>) {
                   className={`${focus} mt-1.5 w-full rounded-md border border-[#CBD3CE] px-3 py-2.5 text-sm font-normal`}
                 />
               </label>
-              <label className="block text-sm font-medium">Claim amount (₹)
-                <input required min="1" type="number" value={newClaim.amount} onChange={e => setNewClaim({ ...newClaim, amount: e.target.value })} placeholder="e.g. 25000"
-                  className={`${focus} mt-1.5 w-full rounded-md border border-[#CBD3CE] px-3 py-2.5 text-sm font-normal`} />
+
+              <label className="block text-sm font-medium">
+                Claim amount (₹)
+                <input
+                  required
+                  min="1"
+                  type="number"
+                  value={newClaim.amount}
+                  onChange={(e) =>
+                    setNewClaim({ ...newClaim, amount: e.target.value })
+                  }
+                  placeholder="e.g. 25000"
+                  className={`${focus} mt-1.5 w-full rounded-md border border-[#CBD3CE] px-3 py-2.5 text-sm font-normal`}
+                />
               </label>
             </div>
+
             <div className="mt-6 flex gap-3">
-              <button type="button" onClick={() => setShowNewClaim(false)} className={`${focus} flex-1 rounded-md border border-[#CBD3CE] px-4 py-2.5 text-sm font-semibold hover:bg-[#E8EDEA]`}>Cancel</button>
-              <button type="submit" className={`${focus} flex-1 rounded-md bg-[#0F5C55] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0B4A44]`}>Add claim</button>
+              <button
+                type="button"
+                onClick={() => setShowNewClaim(false)}
+                className={`${focus} flex-1 rounded-md border border-[#CBD3CE] px-4 py-2.5 text-sm font-semibold hover:bg-[#E8EDEA]`}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className={`${focus} flex-1 rounded-md bg-[#0F5C55] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0B4A44]`}
+              >
+                Add claim
+              </button>
             </div>
           </form>
         </div>
@@ -684,9 +1316,14 @@ async function submitClaim(e: React.FormEvent<HTMLFormElement>) {
 
       {/* Notice */}
       {notice && (
-        <div role="status" className="fixed bottom-5 left-1/2 z-[60] flex max-w-sm -translate-x-1/2 items-start gap-3 rounded-md bg-[#0F2A27] px-4 py-3 text-sm text-white shadow-xl">
+        <div
+          role="status"
+          className="fixed bottom-5 left-1/2 z-[60] flex max-w-sm -translate-x-1/2 items-start gap-3 rounded-md bg-[#0F2A27] px-4 py-3 text-sm text-white shadow-xl"
+        >
           <span>{notice}</span>
-          <button onClick={() => setNotice("")} aria-label="Dismiss"><X size={16} /></button>
+          <button onClick={() => setNotice("")} aria-label="Dismiss">
+            <X size={16} />
+          </button>
         </div>
       )}
     </div>

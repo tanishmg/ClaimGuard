@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { mysqlPool } from "@/lib/mysql";
 import type { RowDataPacket } from "mysql2";
 import { redis } from "@/lib/redis";
+import { getAuthUser } from "@/lib/auth";
 
 interface ClaimRow extends RowDataPacket {
   claim_id: number;
@@ -35,6 +36,10 @@ function extractBillAmount(text: string): number | null {
 }
 
 export async function POST(request: Request) {
+  const user = await getAuthUser(request);
+  if (!user || user.role !== "developer") {
+    return NextResponse.json({ error: "Developer login required." }, { status: 401 });
+  }
   try {
     const body = await request.json();
     const claimId = String(body.claimId ?? "");

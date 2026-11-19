@@ -1,6 +1,7 @@
 
 import { NextResponse } from "next/server";
 import { mysqlPool } from "@/lib/mysql";
+import { getAuthUser } from "@/lib/auth";
 import type { RowDataPacket } from "mysql2";
 
 
@@ -23,7 +24,11 @@ function formatStatus(status: string) {
   return "Under review";
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const user = await getAuthUser(request);
+  if (!user || user.role !== "developer") {
+    return NextResponse.json({ error: "Developer login required." }, { status: 401 });
+  }
   try {
     const [rows] = await mysqlPool.query<DbClaim[]>(
       `SELECT
@@ -68,6 +73,10 @@ export async function GET() {
 
 
 export async function POST(request: Request) {
+  const user = await getAuthUser(request);
+  if (!user || user.role !== "user") {
+    return NextResponse.json({ error: "User login required." }, { status: 401 });
+  }
   try {
     const body = await request.json();
 
